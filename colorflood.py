@@ -10,15 +10,6 @@ from copy import deepcopy
 def get_runnable(func):
     return lambda : Thread(target=func).start()
 
-def add_before_after(before, func, after):
-    def f():
-        before()
-        to_ret = func()
-        after()
-        return to_ret
-
-    return f
-
 def set_button_color(button, color):
     button.config(bg=color)
 
@@ -98,6 +89,7 @@ class ColorFlood:
         
         return self.game_finished
 
+
 class GameView:
     def __init__(self, cellSize, game, rootView):
         screenWidth  = root.winfo_screenwidth()
@@ -139,8 +131,6 @@ class GameView:
                 self.buttons[i][j].config(bg=game.nodes[i][j])
 
 
-
-
 class GamePlayer:
     def __init__(self, gameView, gameState):
         self.gameView = gameView
@@ -164,17 +154,17 @@ class HumanPlayer(GamePlayer):
     def get_button_callback(self, button):
         return lambda : self.make_move(get_button_color(button))
 
+
 class NonHumanPlayer(GamePlayer):
     def __init__(self, gameView, gameState, string):
         super(NonHumanPlayer, self).__init__(gameView, gameState)
         Button(gameView.players, text=string, command=get_runnable(self.play)).pack(side=LEFT)
-        self.get_move = add_before_after(self.before_move, self.get_move, self.after_move)
-
-    def before_move(self):      
+        
+    def before_play(self):
         for control in gameView.controls:
             control.config(state=DISABLED)
 
-    def after_move(self):
+    def after_play(self):
         for control in gameView.controls:
             control.config(state=NORMAL)
     
@@ -182,9 +172,14 @@ class NonHumanPlayer(GamePlayer):
         pass
 
     def play(self):
+        self.before_play()
+        
         while not self.gameState.game_finished:
             self.make_move(self.get_move())
             time.sleep(0.7)
+        
+        self.after_play()
+
 
 class GreedyPlayer(NonHumanPlayer):
     def __init__(self, gameView, gameState):
