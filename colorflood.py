@@ -32,18 +32,29 @@ def get_neighbors(i, j, grid):
 
     return neighbors
 
+def get_call_all(funcs):
+    def f():
+        return [func() for func in funcs]
+
+    return f
+
 
 class ColorFlood:
     
-    colors = ['white', 'red', 'blue', 'yellow', 'green', 'black']
+    colors = ['white', 'red', 'blue', 'yellow', 'green']
 
     def __init__(self, num_rows, num_cols):
         self.reset_game(num_rows, num_cols)
 
-    def reset_game(self, num_rows, num_cols):
+    def reset_game(self, num_rows, num_cols, nodes=None):
         self.num_rows = num_rows
         self.num_cols = num_cols
-        self.nodes = [[self.getRandomColor() for i in range(num_cols)] for j in range(num_rows)]
+        self.nodes = nodes
+        
+        if self.nodes is None:
+            self.nodes = [[self.getRandomColor() for i in range(num_cols)] for j in range(num_rows)]
+        
+        self.nodes_init = deepcopy(self.nodes)
         self.counts = Counter(flatten(self.nodes))
         self.num_tiles = num_cols * num_rows
         self.turns = 0
@@ -102,14 +113,15 @@ class GameView:
         self.buttons = []
         self.controls = []
         self.players = None
+        self.all_buttons = []
         self.draw_interface()
 
     def draw_interface(self):
-        for i in range(game.num_rows):
+        for i in range(self.game.num_rows):
             f = Frame(self.frame)
             f.pack()
             self.buttons.append(list())
-            for j in range(game.num_cols):
+            for j in range(self.game.num_cols):
                 button = Button(f, bg=game.nodes[i][j], width=self.cellWidth, height=self.cellHeight, state=DISABLED)
                 button.pack(side=LEFT)
                 self.buttons[i].append(button)
@@ -122,8 +134,13 @@ class GameView:
             button.pack(side=LEFT)  
             self.controls.append(button)
 
-        self.players = Frame(self.frame)
-        self.players.pack(side=LEFT)
+        self.players = Frame(self.frame, padx=10, pady=10)
+        self.players.pack()
+        func = get_call_all([lambda : self.game.reset_game(self.game.num_rows, self.game.num_cols, self.game.nodes_init), self.refresh])
+        b = Button(self.frame, pady=10, text='Reset Game', command=func)        
+        b.pack()
+        self.all_buttons.extend(self.controls)
+        self.all_buttons.append(b)
 
     def refresh(self):
         for i in range(game.num_rows):
@@ -158,14 +175,24 @@ class HumanPlayer(GamePlayer):
 class NonHumanPlayer(GamePlayer):
     def __init__(self, gameView, gameState, string):
         super(NonHumanPlayer, self).__init__(gameView, gameState)
-        Button(gameView.players, text=string, command=get_runnable(self.play)).pack(side=LEFT)
-        
+        b = Button(gameView.players, text=string, command=get_runnable(self.play))
+        gameView.all_buttons.append(b)
+        b.pack(side=LEFT)
+    
+    # rates colors according to the length of captured nodes. useful for various players
+    def get_color_score(self, color):
+        nodes, counts = deepcopy(self.gameState.nodes), deepcopy(self.gameState.counts) # copy old values
+        self.gameState.nodes, self.gameState.counts = self.gameState.get_new_state(color) # update
+        captured_nodes = self.gameState.get_captured_nodes()
+        self.gameState.nodes, self.gameState.counts = nodes, counts # reset old values
+        return len(captured_nodes)
+
     def before_play(self):
-        for control in gameView.controls:
+        for control in gameView.all_buttons:
             control.config(state=DISABLED)
 
     def after_play(self):
-        for control in gameView.controls:
+        for control in gameView.all_buttons:
             control.config(state=NORMAL)
     
     def get_move(self):
@@ -181,30 +208,90 @@ class NonHumanPlayer(GamePlayer):
         self.after_play()
 
 
+
+
 class GreedyPlayer(NonHumanPlayer):
     def __init__(self, gameView, gameState):
         super(GreedyPlayer, self).__init__(gameView, gameState, 'Try Greedy')
+    
+    def get_moves(self):
+        moves = []
+        nodes, counts = deepcopy(self.gameState.nodes), deepcopy(self.gameState.counts)
+        while all(count < self.gameState.num_tiles for color,count in self.gameState.counts.items()):
+            color = self.get_move()
+            moves.append(color)
+            self.gameState.nodes, self.gameState.counts = self.gameState.get_new_state(color)
+
+        self.gameState.nodes, self.gameState.counts = nodes, counts
         
+        return moves[::-1] 
+
     def get_move(self):
-        num_nodes = 0
-        best_color = ColorFlood.colors[0]
+        score, color = max((self.get_color_score(color), color) for color in ColorFlood.colors)
+        return color
+
+class OptimalPlayer(NonHumanPlayer):
+    def __init__(self, gameView, gameState, max_depth):
+        super(OptimalPlayer, self).__init__(gameView, gameState, 'Try Optimal Strategy')
+        self.moves = None
+        self.max_depth = max_depth
+
+    def get_move(self):
         nodes, counts = deepcopy(self.gameState.nodes), deepcopy(self.gameState.counts) 
-        for color in ColorFlood.colors:
-            temp_nodes, temp_counts = self.gameState.get_new_state(color)
-            self.gameState.nodes, self.gameState.counts = temp_nodes, temp_counts
-            temp = self.gameState.get_captured_nodes()
-            if len(temp) >= num_nodes:
-                best_color = color
-                num_nodes = len(temp)
-            self.gameState.nodes, self.gameState.counts = deepcopy(nodes), deepcopy(counts)
-        return best_color
+             
+
+        # performs dfs
+        def get_moves(nodes, counts, num_moves, min_moves):
+            #self.gameView.refresh()
+            if any(count == self.gameState.num_tiles for color, count in counts.items()):
+                return (num_moves, [])
+            elif num_moves > min_moves:
+                return (float('inf'), [])
+                
+            else:
+                # moves stored in reverse order
+                moves = []
+                for color in ColorFlood.colors:
+                    num_captured_ndoes = len(self.gameState.get_captured_nodes())
+                    new_nodes, new_counts = self.gameState.get_new_state(color)
+                    self.gameState.nodes, self.gameState.counts = deepcopy(new_nodes), deepcopy(new_counts)
+                    if len(self.gameState.get_captured_nodes()) > num_captured_ndoes: # otherwise we end up getting cycles
+                        new_num_moves, temp_moves = get_moves(new_nodes, new_counts, num_moves + 1, min_moves)
+                        if new_num_moves <= min_moves:
+                            min_moves = new_num_moves
+                            moves = temp_moves
+                            moves.append(color)
+                    
+                    self.gameState.nodes, self.gameState.counts = deepcopy(nodes), deepcopy(counts)
+                
+                if moves == []: # no strategy found
+                    return (float('inf'), [])
+                else:
+                    return (min_moves, moves)
+
+
+        
+        if self.moves is None:
+            # perform iterative deepening
+            for i in range(1, self.max_depth + 1):
+                print('assuming there exists a strategy of ', i)
+                num_moves, self.moves = get_moves(nodes, counts, 0, i)
+                if self.moves:
+                    break
+                else:
+                    print('no such strategy exists: ', num_moves)
+            print('found optimal strategy')
+        if self.moves:
+            return self.moves.pop()
+
 
 
 root = Tk() #'root' gui element
-game = ColorFlood(8, 10)
+game = ColorFlood(5, 5)
 gameView = GameView(5, game, root)
 player = HumanPlayer(gameView, game)
 greedyPlayer = GreedyPlayer(gameView, game)
+optimalPlayer = OptimalPlayer(gameView, game, len(greedyPlayer.get_moves()))
 
 root.mainloop()
 root.destroy()
