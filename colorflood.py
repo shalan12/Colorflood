@@ -245,7 +245,9 @@ class OptimalPlayer(NonHumanPlayer):
             #self.gameView.refresh()
             if any(count == self.gameState.num_tiles for color, count in counts.items()):
                 return (num_moves, [])
-            elif num_moves > min_moves:
+            
+            colors_on_board = len([color for color, count in counts.items() if count > 0])
+            if num_moves + colors_on_board > min_moves: # performed num_moves already and need atleast colors_on_board moves more 
                 return (float('inf'), [])
                 
             else:
@@ -287,7 +289,7 @@ class OptimalPlayer(NonHumanPlayer):
 
 
 root = Tk() #'root' gui element
-game = ColorFlood(5, 5)
+game = ColorFlood(8, 8)
 gameView = GameView(5, game, root)
 player = HumanPlayer(gameView, game)
 greedyPlayer = GreedyPlayer(gameView, game)
